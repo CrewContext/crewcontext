@@ -5,10 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "crewcontext"
 version = "0.1.0"
-description = "Context coordination layer for multi-agent business workflows"
+description = "Auditable shared memory for AI agent systems"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+keywords = ["agents", "multi-agent", "context", "event-sourcing", "audit", "orchestration"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = [
     "psycopg[binary]>=3.1",
     "psycopg_pool>=3.1",
@@ -16,6 +28,13 @@ dependencies = [
     "python-dotenv>=1.0",
     "click>=8.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/crewcontext/crewcontext"
+Documentation = "https://github.com/crewcontext/crewcontext/tree/main/docs"
+Repository = "https://github.com/crewcontext/crewcontext"
+Changelog = "https://github.com/crewcontext/crewcontext/blob/main/CHANGELOG.md"
+Issues = "https://github.com/crewcontext/crewcontext/issues"
 
 [project.optional-dependencies]
 dev = [
