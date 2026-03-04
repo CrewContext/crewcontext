@@ -37,14 +37,14 @@ CrewContext is a **context coordination layer** that sits underneath your agent 
               ┌────────────────┼────────────────┐
               │                │                │
     ┌─────────▼──────┐   ┌─────▼──────┐  ┌──────▼──────┐
-    │  PostgreSQL     │  │   Neo4j    │  │   Policy    │
-    │  Event Store    │  │   Graph    │  │   Router    │
-    │                 │  │            │  │             │
-    │  Append-only    │  │  Lineage   │  │  Rules      │
-    │  Temporal       │  │  Causal    │  │  Pub/Sub    │
-    │  Causal links   │  │  DAG       │  │  Routing    │
-    │  Versioned      │  │  Typed     │  │  decisions  │
-    │  entities       │  │  relations │  │             │
+    │  PostgreSQL    │   │   Neo4j    │  │   Policy    │
+    │  Event Store   │   │   Graph    │  │   Router    │
+    │                │   │            │  │             │
+    │  Append-only   │   │  Lineage   │  │  Rules      │
+    │  Temporal      │   │  Causal    │  │  Pub/Sub    │
+    │  Causal links  │   │  DAG       │  │  Routing    │
+    │  Versioned     │   │  Typed     │  │  decisions  │
+    │  entities      │   │  relations │  │             │
     └────────────────┘   └────────────┘  └─────────────┘
          (truth)          (optional)      (in-process)
 ```
