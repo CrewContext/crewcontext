@@ -1,16 +1,11 @@
 <p align="center">
+  <img width="128" height="128" alt="crewcontext_logo_128" src="https://github.com/user-attachments/assets/db17d668-adca-401d-ab4e-901c05f60af4" />
+</p>
+<p align="center">
   <h1 align="center">CrewContext</h1>
   <p align="center"><strong>Auditable shared memory for AI agent systems.</strong></p>
 </p>
 
-<p align="center">
-  <a href="https://github.com/CrewContext/crewcontext/actions"><img src="https://img.shields.io/github/actions/workflow/status/CrewContext/crewcontext/ci.yml?branch=main&style=flat-square" alt="CI"></a>
-  <a href="https://pypi.org/project/crewcontext/"><img src="https://img.shields.io/pypi/v/crewcontext?style=flat-square" alt="PyPI"></a>
-  <a href="https://pypi.org/project/crewcontext/"><img src="https://img.shields.io/pypi/pyversions/crewcontext?style=flat-square" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/CrewContext/crewcontext?style=flat-square" alt="License"></a>
-</p>
-
----
 
 ## The Problem
 
