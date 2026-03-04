@@ -30,13 +30,13 @@ CrewContext is a **context coordination layer** that sits underneath your agent 
 
 ```
                     ┌──────────────────────────────────┐
-                    │        ProcessContext API         │
-                    │  emit · query · timeline · causal │
+                    │        ProcessContext API        │
+                    │  emit · query · timeline · causal│
                     └──────────┬───────────────────────┘
                                │
               ┌────────────────┼────────────────┐
               │                │                │
-    ┌─────────▼──────┐  ┌─────▼──────┐  ┌──────▼──────┐
+    ┌─────────▼──────┐   ┌─────▼──────┐  ┌──────▼──────┐
     │  PostgreSQL     │  │   Neo4j    │  │   Policy    │
     │  Event Store    │  │   Graph    │  │   Router    │
     │                 │  │            │  │             │
@@ -45,7 +45,7 @@ CrewContext is a **context coordination layer** that sits underneath your agent 
     │  Causal links   │  │  DAG       │  │  Routing    │
     │  Versioned      │  │  Typed     │  │  decisions  │
     │  entities       │  │  relations │  │             │
-    └────────────────┘  └────────────┘  └─────────────┘
+    └────────────────┘   └────────────┘  └─────────────┘
          (truth)          (optional)      (in-process)
 ```
 
