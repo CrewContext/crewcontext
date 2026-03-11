@@ -20,8 +20,10 @@ from .router import (
     event_type_is,
 )
 from .schema import EventSchema, SchemaRegistry, ValidationError
+from .metrics import MetricsCollector
+from .health import HealthChecker, HealthCheckResult, HealthStatus
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     # Core API
     "ProcessContext",
@@ -45,4 +47,9 @@ __all__ = [
     "EventSchema",
     "SchemaRegistry",
     "ValidationError",
+    # Observability (Phase 2)
+    "MetricsCollector",
+    "HealthChecker",
+    "HealthCheckResult",
+    "HealthStatus",
 ]

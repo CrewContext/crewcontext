@@ -100,6 +100,151 @@ class ProcessContext:
         """Export all metrics for external monitoring systems."""
         return self._metrics.export()
 
+    # -- event replay -------------------------------------------------------
+
+    def replay_events(
+        self,
+        entity_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        as_of: Optional[datetime] = None,
+        replay_handler: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Replay events to rebuild state or for debugging.
+
+        Args:
+            entity_id: Optional entity to replay events for.
+            event_type: Optional event type filter.
+            as_of: Optional point-in-time to replay up to.
+            replay_handler: Optional callback for each event.
+
+        Returns:
+            Dictionary with replay statistics.
+
+        Usage:
+            # Replay all events for an entity
+            stats = ctx.replay_events(entity_id="inv-123")
+            print(f"Replayed {stats['events_replayed']} events")
+
+            # Replay with custom handler
+            def my_handler(event):
+                print(f"Event: {event['type']}")
+            ctx.replay_events(replay_handler=my_handler)
+        """
+        events = self.query(
+            entity_id=entity_id,
+            event_type=event_type,
+            as_of=as_of,
+            limit=10000,
+        )
+
+        replayed = 0
+        errors = 0
+
+        for event in events:
+            try:
+                if replay_handler:
+                    replay_handler(event)
+                replayed += 1
+            except Exception:
+                errors += 1
+                log.exception("Error replaying event %s", event.get("id", "unknown"))
+
+        return {
+            "events_replayed": replayed,
+            "errors": errors,
+            "entity_id": entity_id,
+            "event_type": event_type,
+            "as_of": as_of.isoformat() if as_of else None,
+        }
+
+    def rebuild_entity_state(self, entity_id: str, as_of: Optional[datetime] = None) -> Dict[str, Any]:
+        """Rebuild entity state by replaying its events.
+
+        Args:
+            entity_id: Entity to rebuild state for.
+            as_of: Optional point-in-time to rebuild state at.
+
+        Returns:
+            Rebuilt entity state with metadata.
+
+        Usage:
+            state = ctx.rebuild_entity_state("inv-123")
+            print(f"Entity type: {state['type']}")
+            print(f"Attributes: {state['attributes']}")
+        """
+        events = self.timeline(entity_id, as_of=as_of)
+
+        if not events:
+            return {
+                "entity_id": entity_id,
+                "type": None,
+                "attributes": {},
+                "version": 0,
+                "events_replayed": 0,
+            }
+
+        # Build state by applying events in order
+        state: Dict[str, Any] = {}
+        entity_type: Optional[str] = None
+
+        for event in events:
+            entity_type = event.get("type")
+            event_data = event.get("data", {})
+
+            # Apply event to state (simple merge - can be customized)
+            if event["type"].endswith(".received"):
+                # Initial event - set all fields
+                state.update(event_data)
+            elif event["type"].endswith(".updated"):
+                # Update event - merge fields
+                state.update(event_data)
+            elif event["type"].endswith(".validated"):
+                # Validation event - add validation fields
+                state["validation"] = event_data
+            elif event["type"].endswith(".completed"):
+                # Completion event - mark as done
+                state["status"] = "completed"
+                state.update(event_data)
+            else:
+                # Default: merge data
+                state.update(event_data)
+
+        return {
+            "entity_id": entity_id,
+            "type": entity_type,
+            "attributes": state,
+            "version": len(events),
+            "events_replayed": len(events),
+            "as_of": as_of.isoformat() if as_of else None,
+        }
+
+    def export_events(
+        self,
+        entity_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        format: str = "json",
+    ) -> str:
+        """Export events for backup or migration.
+
+        Args:
+            entity_id: Optional entity filter.
+            event_type: Optional type filter.
+            format: Output format ("json" or "ndjson").
+
+        Returns:
+            Serialized events as string.
+        """
+        import json
+
+        events = self.query(entity_id=entity_id, event_type=event_type, limit=10000)
+
+        if format == "ndjson":
+            # Newline-delimited JSON (one JSON object per line)
+            return "\n".join(json.dumps(e) for e in events)
+        else:
+            # Standard JSON array
+            return json.dumps(events, indent=2, default=str)
+
     # -- schema management --------------------------------------------------
 
     def register_event_schema(

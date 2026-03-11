@@ -4,9 +4,147 @@
 
 This document summarizes the architectural improvements made to CrewContext since v0.1.0. All changes address critical issues identified in the [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md).
 
+**Status:** ✅ Phase 1 (Stability) + ✅ Phase 2 (Observability) Complete
+
 ---
 
-## 1. Idempotency Key Support ✅
+## Phase 2: Observability (NEW)
+
+### 1. Structured JSON Logging ✅
+
+**Problem:** Human-readable logs are hard to parse in production log aggregation systems.
+
+**Solution:** Added JSON-formatted structured logging.
+
+```python
+from crewcontext.logging_config import setup_logging, get_logger
+
+# Setup at application start
+setup_logging(level="INFO", json_format=True, service_name="my-service")
+
+# Use in code
+log = get_logger(__name__)
+log.info("Event emitted", extra={"event_id": "abc123", "agent_id": "agent-1"})
+```
+
+**Output:**
+```json
+{
+  "timestamp": "2026-03-11T22:00:00Z",
+  "level": "INFO",
+  "logger": "my_module",
+  "message": "Event emitted",
+  "service": "my-service",
+  "event_id": "abc123",
+  "agent_id": "agent-1"
+}
+```
+
+### 2. Health Check API ✅
+
+**Problem:** No Kubernetes-style health endpoints for orchestration.
+
+**Solution:** Added comprehensive health checking with liveness, readiness, and startup probes.
+
+```python
+from crewcontext import HealthChecker, ProcessContext
+
+checker = HealthChecker()
+
+# Add checks
+checker.add_check("postgres", lambda: pg_store.connect() or True)
+checker.add_check("neo4j", lambda: projector.available, required=False)
+
+# Get status
+status = checker.get_status()
+print(f"Healthy: {status.healthy}")
+print(f"Uptime: {status.uptime_seconds}s")
+
+# For Kubernetes
+is_live = checker.is_live()      # Liveness probe
+is_ready = checker.is_ready()    # Readiness probe
+```
+
+**Kubernetes Integration:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
+```
+
+### 3. Event Replay API ✅
+
+**Problem:** No way to rebuild state from events or debug issues by replaying history.
+
+**Solution:** Added event replay and state rebuild capabilities.
+
+```python
+with ProcessContext(process_id="p1", agent_id="agent-1") as ctx:
+    # Replay events with custom handler
+    def handler(event):
+        print(f"Event: {event['type']}")
+    
+    stats = ctx.replay_events(
+        entity_id="inv-123",
+        replay_handler=handler
+    )
+    print(f"Replayed {stats['events_replayed']} events")
+    
+    # Rebuild entity state from events
+    state = ctx.rebuild_entity_state("inv-123")
+    print(f"Entity version: {state['version']}")
+    print(f"Attributes: {state['attributes']}")
+    
+    # Export events for backup
+    json_export = ctx.export_events(format="json")
+    ndjson_export = ctx.export_events(format="ndjson")
+```
+
+### 4. Prometheus Metrics Export ✅
+
+**Problem:** Metrics were in-memory only, no integration with monitoring systems.
+
+**Solution:** Added Prometheus text exposition format export.
+
+```python
+from crewcontext import ProcessContext
+
+with ProcessContext(process_id="p1", agent_id="agent-1") as ctx:
+    ctx.emit("invoice.received", {"amount": 5000})
+    
+    # Export to Prometheus format
+    prometheus_metrics = ctx.metrics.to_prometheus()
+    
+# Example output:
+# TYPE crewcontext_emit_success counter
+# crewcontext_emit_success 42
+# TYPE crewcontext_emit_latency_ms summary
+# crewcontext_emit_latency_ms_count 42
+# crewcontext_emit_latency_ms_sum 1234.567
+# crewcontext_emit_latency_ms{quantile="0.5"} 25.5
+# crewcontext_emit_latency_ms{quantile="0.95"} 120.0
+```
+
+**FastAPI Integration:**
+```python
+from fastapi import Response
+
+@app.get("/metrics")
+def metrics():
+    return Response(
+        ctx.metrics.to_prometheus(),
+        media_type="text/plain"
+    )
+```
+
+---
+
+## Phase 1: Stability
 
 **Problem:** Network retries could cause duplicate events, breaking event sourcing guarantees.
 
@@ -362,19 +500,25 @@ New test coverage needed for:
 
 ## Files Changed Summary
 
-### New Files
+### Phase 2 New Files (Observability)
+- `crewcontext/logging_config.py` — Structured JSON logging
+- `crewcontext/health.py` — Health check API for Kubernetes
+- `tests/test_observability.py` — Phase 2 feature tests
+
+### Phase 1 New Files (Stability)
 - `crewcontext/schema.py` — Pydantic schema validation
-- `crewcontext/metrics.py` — Metrics collection framework
+- `crewcontext/metrics.py` — Metrics collection + Prometheus export
 - `ARCHITECTURE_REVIEW.md` — Comprehensive architecture review
 - `IMPROVEMENTS.md` — This document
 
 ### Modified Files
+- `crewcontext/context.py` — Event replay API, metrics integration, schema validation, idempotency
 - `crewcontext/models.py` — Added `__repr__` methods
-- `crewcontext/context.py` — Integrated metrics, schema validation, idempotency
-- `crewcontext/store/postgres.py` — Idempotency, retry logic, batch limits
+- `crewcontext/store/postgres.py` — Idempotency keys, retry logic, batch limits
 - `crewcontext/store/base.py` — Added idempotency method
 - `crewcontext/projection/projector.py` — Retry logic, circuit breaker, metrics
-- `crewcontext/__init__.py` — Exported schema classes
+- `crewcontext/__init__.py` — Exported new classes, version bump to 0.2.0
+- `crewcontext/metrics.py` — Added Prometheus export format
 - `pyproject.toml` — Added pydantic dependency
 - `.env.example` — Security best practices
 

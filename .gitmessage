@@ -1,0 +1,12 @@
+feat: Add Phase 2 observability features
+
+New capabilities:
+- Structured JSON logging for production
+- Health check API (Kubernetes-ready)
+- Event replay and state rebuild
+- Prometheus metrics export
+
+Files:
+- New: health.py, logging_config.py, test_observability.py
+- Modified: context.py (replay API), metrics.py (Prometheus), __init__.py (v0.2.0)
+- Updated: IMPROVEMENTS.md with Phase 2 documentation

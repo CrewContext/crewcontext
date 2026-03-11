@@ -234,6 +234,74 @@ class MetricsCollector:
         self._failures.clear()
         self._last_success.clear()
 
+    # -- Prometheus export --------------------------------------------------
+
+    def to_prometheus(self) -> str:
+        """Export metrics in Prometheus text exposition format.
+
+        Returns:
+            Metrics in Prometheus format for scraping.
+
+        Usage:
+            # In your HTTP server
+            @app.get("/metrics")
+            def metrics():
+                return Response(ctx.metrics.to_prometheus(), media_type="text/plain")
+        """
+        lines = []
+
+        # Export counters
+        for key, value in self._counters.items():
+            metric_name = self._prometheus_name(key)
+            lines.append(f"# TYPE {metric_name} counter")
+            lines.append(f"{metric_name} {value}")
+
+        # Export histograms with stats
+        for key, values in self._histograms.items():
+            if not values:
+                continue
+            metric_name = self._prometheus_name(key)
+            stats = self.get_histogram_stats(key.replace(f"{self.service_name}.", "").split("{")[0])
+
+            lines.append(f"# TYPE {metric_name} summary")
+            lines.append(f"{metric_name}_count {stats['count']}")
+            lines.append(f"{metric_name}_sum {sum(values):.3f}")
+            lines.append(f"{metric_name}{{quantile=\"0.5\"}} {stats['p50']:.3f}")
+            lines.append(f"{metric_name}{{quantile=\"0.95\"}} {stats['p95']:.3f}")
+            lines.append(f"{metric_name}{{quantile=\"0.99\"}} {stats['p99']:.3f}")
+
+        # Export gauges
+        for key, value in self._gauges.items():
+            metric_name = self._prometheus_name(key)
+            lines.append(f"# TYPE {metric_name} gauge")
+            lines.append(f"{metric_name} {value}")
+
+        return "\n".join(lines)
+
+    def _prometheus_name(self, name: str) -> str:
+        """Convert metric name to Prometheus format.
+
+        Converts:
+        - Dots to underscores
+        - Removes special characters
+        - Ensures valid Prometheus name
+        """
+        # Remove service prefix if present
+        if name.startswith(f"{self.service_name}."):
+            name = name[len(self.service_name) + 1:]
+
+        # Replace dots with underscores
+        name = name.replace(".", "_")
+
+        # Remove any invalid characters
+        name = "".join(c if c.isalnum() or c == "_" else "_" for c in name)
+
+        # Ensure starts with letter
+        if name and not name[0].isalpha():
+            name = "m_" + name
+
+        return f"crewcontext_{name}"
+
 
 # -- context manager for timing ----------------------------------------------
 
