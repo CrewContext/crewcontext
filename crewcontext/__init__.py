@@ -26,7 +26,7 @@ from .security import AccessPolicy, Permission, Role, AccessDecision
 from .encryption import EncryptionManager, EncryptedStore
 from .secrets import SecretsManager, secret, require_secret
 
-__version__ = "0.3.0"
+__version__ = "0.2.0"
 __all__ = [
     # Core API
     "ProcessContext",

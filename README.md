@@ -3,9 +3,17 @@
 </p>
 <p align="center">
   <h1 align="center">CrewContext</h1>
-  <p align="center"><strong>Auditable shared memory for AI agent systems.</strong></p>
+  <p align="center"><strong>Enterprise-ready shared memory for AI agent systems.</strong></p>
+  <p align="center">
+    <a href="https://pypi.org/project/crewcontext/"><img src="https://img.shields.io/pypi/v/crewcontext.svg" alt="PyPI"></a>
+    <a href="https://github.com/crewcontext/crewcontext/blob/main/LICENSE"><img src="https://img.shields.io/github/license/crewcontext/crewcontext.svg" alt="License"></a>
+    <a href="https://github.com/crewcontext/crewcontext/actions"><img src="https://img.shields.io/github/actions/workflow/status/crewcontext/crewcontext/ci.yml" alt="CI"></a>
+  </p>
 </p>
 
+**v0.2.0** — Now with enterprise security, observability, and stability features!
+
+---
 
 ## The Problem
 
@@ -25,6 +33,28 @@ CrewContext is a **context coordination layer** that sits underneath your agent 
 - **Versioned entities** — Business objects (invoices, customers, claims) are snapshotted at each stage, never overwritten.
 - **Policy router** — Deterministic, auditable routing rules with composable conditions. No black boxes.
 - **Provenance tracking** — Every event records which agent, what scope, and when. Built for auditors.
+
+## What's New in v0.2.0
+
+### 🔒 Security
+- **Role-Based Access Control (RBAC)** — Scope-based permissions for agents
+- **Event Encryption** — Field-level encryption for sensitive data (AES-128)
+- **Audit Logging** — Complete query and access trail for compliance
+- **Secrets Management** — Support for env, file, JSON, and HashiCorp Vault
+
+### 🔍 Observability
+- **Structured Logging** — JSON-formatted logs for production
+- **Health Checks** — Kubernetes-ready liveness/readiness probes
+- **Event Replay** — Rebuild state from event history
+- **Prometheus Metrics** — Native metrics export for monitoring
+
+### 🛡️ Stability
+- **Idempotency Keys** — Prevent duplicate event emission
+- **Schema Validation** — Pydantic-based event validation
+- **Retry Logic** — Exponential backoff with circuit breakers
+- **Batch Limits** — Protect against memory exhaustion
+
+See [IMPROVEMENTS.md](IMPROVEMENTS.md) for the complete guide.
 
 ## Architecture
 
