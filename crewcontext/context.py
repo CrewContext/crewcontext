@@ -21,6 +21,7 @@ from .router import PolicyRouter
 from .schema import EventSchema, SchemaRegistry, ValidationError
 from .store.postgres import PostgresStore
 from .metrics import MetricsCollector, measure_time
+from .security import AccessPolicy, Permission, AccessDecision
 
 log = logging.getLogger(__name__)
 
@@ -45,17 +46,20 @@ class ProcessContext:
         scope: str = "default",
         db_url: Optional[str] = None,
         enable_neo4j: bool = True,
+        access_policy: Optional[AccessPolicy] = None,
     ):
         self.process_id = process_id
         self.agent_id = agent_id
         self.scope = scope
 
         self._metrics = MetricsCollector(service_name=f"crewcontext.{process_id[:8]}")
+        self._access_policy = access_policy or AccessPolicy(enable_audit=True)
         self._store = PostgresStore(db_url, metrics=self._metrics)
         self._projector = Neo4jProjector(metrics=self._metrics) if enable_neo4j else None
         self._router = PolicyRouter()
         self._schema_registry = SchemaRegistry()
         self._connected = False
+        self._query_audit_log: List[Dict[str, Any]] = []
 
     # -- context manager ----------------------------------------------------
 
@@ -99,6 +103,66 @@ class ProcessContext:
     def get_metrics(self) -> dict:
         """Export all metrics for external monitoring systems."""
         return self._metrics.export()
+
+    # -- access control -----------------------------------------------------
+
+    @property
+    def access_policy(self) -> AccessPolicy:
+        """Access the access control policy."""
+        return self._access_policy
+
+    def check_access(
+        self,
+        permission: Permission,
+        scope: Optional[str] = None,
+    ) -> bool:
+        """Check if current agent has permission to access scope.
+
+        Args:
+            permission: Permission to check.
+            scope: Scope to check (defaults to context scope).
+
+        Returns:
+            True if access is allowed.
+        """
+        return self._access_policy.can_access(
+            self.agent_id,
+            scope or self.scope,
+            permission,
+        )
+
+    def _audit_query(
+        self,
+        query_type: str,
+        entity_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+        result_count: int = 0,
+    ) -> None:
+        """Log a query for audit purposes."""
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "agent_id": self.agent_id,
+            "process_id": self.process_id,
+            "query_type": query_type,
+            "entity_id": entity_id,
+            "event_type": event_type,
+            "result_count": result_count,
+            "scope": self.scope,
+        }
+        self._query_audit_log.append(entry)
+
+        # Keep only last 500 queries
+        if len(self._query_audit_log) > 500:
+            self._query_audit_log = self._query_audit_log[-500:]
+
+        log.debug(
+            "Query audit: %s by %s (results: %d)",
+            query_type, self.agent_id, result_count,
+        )
+
+    def get_query_audit_log(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get recent query audit log entries."""
+        return self._query_audit_log[-limit:]
 
     # -- event replay -------------------------------------------------------
 
@@ -414,7 +478,7 @@ class ProcessContext:
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Query events in this process with optional filters."""
-        return self._store.query_events(
+        result = self._store.query_events(
             self.process_id,
             entity_id=entity_id,
             event_type=event_type,
@@ -423,14 +487,18 @@ class ProcessContext:
             limit=limit,
             offset=offset,
         )
+        self._audit_query("query", entity_id, event_type, len(result))
+        return result
 
     def timeline(self, entity_id: str, as_of: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """Get the full ordered event history for an entity."""
-        return self._store.query_events(
+        result = self._store.query_events(
             self.process_id,
             entity_id=entity_id,
             as_of=as_of,
         )
+        self._audit_query("timeline", entity_id, None, len(result))
+        return result
 
     # -- entity snapshots ---------------------------------------------------
 

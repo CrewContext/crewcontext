@@ -1,12 +1,19 @@
-feat: Add Phase 2 observability features
+feat: Add Phase 3 security features
 
-New capabilities:
-- Structured JSON logging for production
-- Health check API (Kubernetes-ready)
-- Event replay and state rebuild
-- Prometheus metrics export
+Enterprise security capabilities:
+- Scope-based RBAC (Role-Based Access Control)
+- Event encryption at rest (field-level)
+- Query audit logging
+- Secrets management (env, file, JSON, Vault)
 
 Files:
-- New: health.py, logging_config.py, test_observability.py
-- Modified: context.py (replay API), metrics.py (Prometheus), __init__.py (v0.2.0)
-- Updated: IMPROVEMENTS.md with Phase 2 documentation
+- New: security.py, encryption.py, secrets.py, test_security.py
+- Modified: context.py (audit logging, access policy), __init__.py (v0.3.0)
+
+Security features:
+- AccessPolicy with roles, permissions, scopes
+- Fine-grained access rules with priority
+- EncryptionManager with Fernet encryption
+- EncryptedStore wrapper for transparent encryption
+- SecretsManager with multiple providers
+- Query audit trail for compliance

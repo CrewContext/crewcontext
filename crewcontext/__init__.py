@@ -22,8 +22,11 @@ from .router import (
 from .schema import EventSchema, SchemaRegistry, ValidationError
 from .metrics import MetricsCollector
 from .health import HealthChecker, HealthCheckResult, HealthStatus
+from .security import AccessPolicy, Permission, Role, AccessDecision
+from .encryption import EncryptionManager, EncryptedStore
+from .secrets import SecretsManager, secret, require_secret
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     # Core API
     "ProcessContext",
@@ -52,4 +55,14 @@ __all__ = [
     "HealthChecker",
     "HealthCheckResult",
     "HealthStatus",
+    # Security (Phase 3)
+    "AccessPolicy",
+    "Permission",
+    "Role",
+    "AccessDecision",
+    "EncryptionManager",
+    "EncryptedStore",
+    "SecretsManager",
+    "secret",
+    "require_secret",
 ]
