@@ -46,6 +46,9 @@ class Entity:
         if not self.type:
             raise ValueError("Entity.type cannot be empty")
 
+    def __repr__(self):
+        return f"Entity(id={self.id!r}, type={self.type!r}, version={self.version})"
+
 
 # ---------------------------------------------------------------------------
 # Relation — a typed, directed edge between two entities
@@ -71,6 +74,9 @@ class Relation:
             raise ValueError("Relation.type cannot be empty")
         if self.from_entity_id == self.to_entity_id:
             raise ValueError("Self-referencing relations are not allowed")
+
+    def __repr__(self):
+        return f"Relation(id={self.id!r}, type={self.type!r}, from={self.from_entity_id!r}, to={self.to_entity_id!r})"
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +112,9 @@ class Event:
         if not self.agent_id:
             raise ValueError("Event.agent_id cannot be empty")
 
+    def __repr__(self):
+        return f"Event(id={self.id!r}, type={self.type!r}, entity={self.entity_id!r})"
+
 
 # ---------------------------------------------------------------------------
 # RoutingDecision — serializable record of a routing evaluation
@@ -132,3 +141,6 @@ class RoutingDecision:
             "metadata": self.metadata,
             "timestamp": self.timestamp.isoformat(),
         }
+
+    def __repr__(self):
+        return f"RoutingDecision(event={self.event_id[:8]}..., rule={self.rule_name!r}, action={self.action!r})"

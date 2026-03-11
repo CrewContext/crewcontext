@@ -19,15 +19,19 @@ from .router import (
     data_fields_differ,
     event_type_is,
 )
+from .schema import EventSchema, SchemaRegistry, ValidationError
 
 __version__ = "0.1.0"
 __all__ = [
+    # Core API
     "ProcessContext",
+    # Models
     "Entity",
     "Event",
     "Relation",
     "RoutingDecision",
     "generate_id",
+    # Router
     "PolicyRouter",
     "all_of",
     "any_of",
@@ -37,4 +41,8 @@ __all__ = [
     "data_field_ne",
     "data_fields_differ",
     "event_type_is",
+    # Schema validation
+    "EventSchema",
+    "SchemaRegistry",
+    "ValidationError",
 ]

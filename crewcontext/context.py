@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type
 
 from .models import Entity, Event, Relation, RoutingDecision, generate_id
 from .projection.projector import Neo4jProjector
 from .router import PolicyRouter
+from .schema import EventSchema, SchemaRegistry, ValidationError
 from .store.postgres import PostgresStore
+from .metrics import MetricsCollector, measure_time
 
 log = logging.getLogger(__name__)
 
@@ -48,9 +50,11 @@ class ProcessContext:
         self.agent_id = agent_id
         self.scope = scope
 
-        self._store = PostgresStore(db_url)
-        self._projector = Neo4jProjector() if enable_neo4j else None
+        self._metrics = MetricsCollector(service_name=f"crewcontext.{process_id[:8]}")
+        self._store = PostgresStore(db_url, metrics=self._metrics)
+        self._projector = Neo4jProjector(metrics=self._metrics) if enable_neo4j else None
         self._router = PolicyRouter()
+        self._schema_registry = SchemaRegistry()
         self._connected = False
 
     # -- context manager ----------------------------------------------------
@@ -85,6 +89,35 @@ class ProcessContext:
     def router(self) -> PolicyRouter:
         return self._router
 
+    # -- metrics ------------------------------------------------------------
+
+    @property
+    def metrics(self) -> MetricsCollector:
+        """Access metrics for monitoring and debugging."""
+        return self._metrics
+
+    def get_metrics(self) -> dict:
+        """Export all metrics for external monitoring systems."""
+        return self._metrics.export()
+
+    # -- schema management --------------------------------------------------
+
+    def register_event_schema(
+        self, event_type: str, schema: Type[EventSchema], strict: bool = None
+    ) -> None:
+        """Register a Pydantic schema for an event type.
+
+        Args:
+            event_type: Dotted event name (e.g. "invoice.received").
+            schema: Pydantic model class for validation.
+            strict: If True, reject unknown fields.
+        """
+        self._schema_registry.register(event_type, schema, strict)
+
+    def set_schema_strict_mode(self, strict: bool) -> None:
+        """Set global strict mode for schema validation."""
+        self._schema_registry.set_strict_mode(strict)
+
     # -- emit events --------------------------------------------------------
 
     def emit(
@@ -95,6 +128,7 @@ class ProcessContext:
         relation_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         caused_by: Optional[Sequence[Event]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Event:
         """Emit an event into the process context.
 
@@ -105,42 +139,73 @@ class ProcessContext:
             relation_id: Optional relation this event affects.
             metadata: Arbitrary metadata.
             caused_by: Parent events that caused this one (builds the DAG).
+            idempotency_key: Optional key to prevent duplicate events.
 
         Returns:
             The persisted Event object.
         """
-        parent_ids = tuple(e.id for e in caused_by) if caused_by else ()
+        with measure_time(self._metrics, "emit", {"type": event_type}):
+            # Check for existing event with same idempotency key
+            if idempotency_key:
+                existing = self._store.get_event_by_idempotency_key(
+                    self.process_id, idempotency_key
+                )
+                if existing:
+                    log.debug(
+                        "Idempotency key already used: %s (returning existing event %s)",
+                        idempotency_key, existing["id"][:8],
+                    )
+                    self._metrics.increment("emit.idempotent", {"type": event_type})
+                    # Reconstruct Event from existing record
+                    return Event(
+                        id=existing["id"],
+                        type=existing["type"],
+                        process_id=existing["process_id"],
+                        data=existing["data"],
+                        agent_id=existing["agent_id"],
+                        entity_id=existing["entity_id"],
+                        relation_id=existing["relation_id"],
+                        scope=existing["scope"],
+                        timestamp=existing["timestamp"],
+                        metadata=existing["metadata"],
+                    )
 
-        event = Event(
-            id=generate_id(),
-            type=event_type,
-            process_id=self.process_id,
-            data=data,
-            agent_id=self.agent_id,
-            entity_id=entity_id,
-            relation_id=relation_id,
-            scope=self.scope,
-            metadata=metadata or {},
-            parent_ids=parent_ids,
-        )
+            # Validate data against registered schema
+            validated_data = self._schema_registry.validate(event_type, data)
 
-        # 1. Persist to source of truth
-        self._store.save_event(event)
+            parent_ids = tuple(e.id for e in caused_by) if caused_by else ()
 
-        # 2. Project to graph (best-effort)
-        if self._projector:
-            self._projector.project_event(event)
+            event = Event(
+                id=generate_id(),
+                type=event_type,
+                process_id=self.process_id,
+                data=validated_data,
+                agent_id=self.agent_id,
+                entity_id=entity_id,
+                relation_id=relation_id,
+                scope=self.scope,
+                metadata=metadata or {},
+                parent_ids=parent_ids,
+            )
 
-        # 3. Notify subscribers
-        self._router.notify_subscribers(event)
+            # 1. Persist to source of truth
+            self._store.save_event(event, idempotency_key=idempotency_key)
 
-        # 4. Evaluate routing rules
-        decision = self._router.evaluate(event)
-        if decision:
-            self._persist_routing_decision(decision, parent_event=event)
+            # 2. Project to graph (best-effort)
+            if self._projector:
+                self._projector.project_event(event)
 
-        log.debug("Emitted: %s (type=%s, entity=%s)", event.id[:8], event_type, entity_id)
-        return event
+            # 3. Notify subscribers
+            self._router.notify_subscribers(event)
+
+            # 4. Evaluate routing rules
+            decision = self._router.evaluate(event)
+            if decision:
+                self._persist_routing_decision(decision, parent_event=event)
+
+            log.debug("Emitted: %s (type=%s, entity=%s)", event.id[:8], event_type, entity_id)
+            self._metrics.increment("emit.success", {"type": event_type})
+            return event
 
     def batch_emit(
         self, events_spec: List[Dict[str, Any]]

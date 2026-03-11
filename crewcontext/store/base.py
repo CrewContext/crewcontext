@@ -54,6 +54,12 @@ class Store(ABC):
     ) -> List[Dict[str, Any]]:
         """Query events with temporal, scope, and pagination support."""
 
+    @abstractmethod
+    def get_event_by_idempotency_key(
+        self, process_id: str, idempotency_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve event by idempotency key (for deduplication)."""
+
     # -- entities -----------------------------------------------------------
     @abstractmethod
     def save_entity(self, entity: Entity) -> None:

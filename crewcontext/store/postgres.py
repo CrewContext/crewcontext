@@ -17,10 +17,12 @@ from psycopg_pool import ConnectionPool
 
 from ..models import Entity, Event, Relation
 from .base import Store
+from ..metrics import MetricsCollector
 
 log = logging.getLogger(__name__)
 
 _DEFAULT_DB_URL = "postgresql://crew:crew@localhost:5432/crewcontext"
+_MAX_BATCH_SIZE = 1000  # Maximum events per batch write
 
 # ---- Schema DDL -----------------------------------------------------------
 
@@ -36,7 +38,8 @@ CREATE TABLE IF NOT EXISTS events (
     agent_id    TEXT        NOT NULL,
     scope       TEXT        NOT NULL DEFAULT 'default',
     timestamp   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    metadata    JSONB       NOT NULL DEFAULT '{}'::jsonb
+    metadata    JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    idempotency_key TEXT
 );
 
 -- Entities: versioned snapshots (one row per version)
@@ -73,12 +76,22 @@ CREATE TABLE IF NOT EXISTS causal_links (
     PRIMARY KEY (parent_event_id, child_event_id)
 );
 
+-- Idempotency keys: prevent duplicate event emission
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    process_id      TEXT        NOT NULL,
+    idempotency_key TEXT        NOT NULL,
+    event_id        TEXT        NOT NULL REFERENCES events(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (process_id, idempotency_key)
+);
+
 -- Indexes for the queries we actually run
 CREATE INDEX IF NOT EXISTS idx_events_process   ON events (process_id);
 CREATE INDEX IF NOT EXISTS idx_events_entity    ON events (entity_id)   WHERE entity_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_type      ON events (type);
 CREATE INDEX IF NOT EXISTS idx_events_scope     ON events (scope);
 CREATE INDEX IF NOT EXISTS idx_events_ts        ON events (timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_idempotency ON events (idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_entities_id      ON entities (id, valid_from DESC);
 CREATE INDEX IF NOT EXISTS idx_relations_from   ON relations (from_entity_id);
 CREATE INDEX IF NOT EXISTS idx_relations_to     ON relations (to_entity_id);
@@ -88,33 +101,70 @@ CREATE INDEX IF NOT EXISTS idx_causal_child     ON causal_links (child_event_id)
 
 
 class PostgresStore(Store):
-    """Production-grade PostgreSQL backend with connection pooling."""
+    """Production-grade PostgreSQL backend with connection pooling.
+
+    Features:
+    - Connection pooling with configurable sizes
+    - Retry logic with exponential backoff
+    - Metrics collection for observability
+    """
 
     def __init__(
         self,
         db_url: Optional[str] = None,
         min_pool: int = 2,
         max_pool: int = 10,
+        metrics: Optional[MetricsCollector] = None,
+        max_retries: int = 3,
+        connect_timeout: int = 10,
     ):
         self.db_url = db_url or os.getenv(
             "CREWCONTEXT_DB_URL", _DEFAULT_DB_URL
         )
         self._min_pool = min_pool
         self._max_pool = max_pool
+        self._metrics = metrics or MetricsCollector(service_name="postgres_store")
+        self._max_retries = max_retries
+        self._connect_timeout = connect_timeout
         self._pool: Optional[ConnectionPool] = None
 
     # -- lifecycle ----------------------------------------------------------
 
     def connect(self) -> None:
+        """Connect to PostgreSQL with retry logic."""
         if self._pool is not None:
             return
-        self._pool = ConnectionPool(
-            self.db_url,
-            min_size=self._min_pool,
-            max_size=self._max_pool,
-            kwargs={"row_factory": dict_row},
-        )
-        log.info("PostgresStore connected (pool %d–%d)", self._min_pool, self._max_pool)
+
+        import time
+
+        for attempt in range(self._max_retries):
+            try:
+                self._pool = ConnectionPool(
+                    self.db_url,
+                    min_size=self._min_pool,
+                    max_size=self._max_pool,
+                    kwargs={"row_factory": dict_row},
+                    open=True,
+                    timeout=self._connect_timeout,
+                )
+                log.info("PostgresStore connected (pool %d–%d)", self._min_pool, self._max_pool)
+                self._metrics.record_success("connect")
+                return
+            except psycopg.OperationalError as e:
+                self._metrics.record_failure("connect", "postgres", e, attempt)
+                if attempt == self._max_retries - 1:
+                    log.error(
+                        "Failed to connect to PostgreSQL after %d attempts: %s",
+                        self._max_retries, e,
+                    )
+                    raise
+                # Exponential backoff
+                delay = 2 ** attempt
+                log.warning(
+                    "PostgreSQL connection attempt %d failed, retrying in %ds...",
+                    attempt + 1, delay,
+                )
+                time.sleep(delay)
 
     def close(self) -> None:
         if self._pool:
@@ -137,7 +187,8 @@ class PostgresStore(Store):
 
     # -- events -------------------------------------------------------------
 
-    def save_event(self, event: Event) -> None:
+    def save_event(self, event: Event, idempotency_key: Optional[str] = None) -> None:
+        """Persist a single event with optional idempotency key."""
         pool = self._ensure_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -145,8 +196,8 @@ class PostgresStore(Store):
                     """
                     INSERT INTO events
                         (id, type, process_id, entity_id, relation_id,
-                         data, agent_id, scope, timestamp, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         data, agent_id, scope, timestamp, metadata, idempotency_key)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO NOTHING
                     """,
                     (
@@ -155,16 +206,40 @@ class PostgresStore(Store):
                         json.dumps(event.data), event.agent_id,
                         event.scope, event.timestamp,
                         json.dumps(event.metadata),
+                        idempotency_key,
                     ),
                 )
+                if idempotency_key:
+                    cur.execute(
+                        """
+                        INSERT INTO idempotency_keys (process_id, idempotency_key, event_id)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (process_id, idempotency_key) DO NOTHING
+                        """,
+                        (event.process_id, idempotency_key, event.id),
+                    )
                 if event.parent_ids:
                     self._insert_causal_links(cur, event.id, event.parent_ids)
             conn.commit()
 
     def save_events(self, events: Sequence[Event]) -> None:
-        """Atomic batch insert — all or nothing."""
+        """Atomic batch insert — all or nothing.
+
+        Args:
+            events: Sequence of events to save atomically.
+
+        Raises:
+            ValueError: If batch size exceeds MAX_BATCH_SIZE.
+        """
         if not events:
             return
+
+        if len(events) > _MAX_BATCH_SIZE:
+            raise ValueError(
+                f"Batch size exceeds limit: {len(events)} > {_MAX_BATCH_SIZE}. "
+                "Consider splitting into smaller batches."
+            )
+
         pool = self._ensure_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -354,3 +429,22 @@ class PostgresStore(Store):
                     (event_id,),
                 )
                 return [row["child_event_id"] for row in cur.fetchall()]
+
+    def get_event_by_idempotency_key(
+        self, process_id: str, idempotency_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve event by idempotency key (for deduplication)."""
+        pool = self._ensure_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT e.id, e.type, e.process_id, e.entity_id, e.relation_id,
+                           e.data, e.agent_id, e.scope, e.timestamp, e.metadata
+                    FROM events e
+                    JOIN idempotency_keys ik ON e.id = ik.event_id
+                    WHERE ik.process_id = %s AND ik.idempotency_key = %s
+                    """,
+                    (process_id, idempotency_key),
+                )
+                return cur.fetchone()
